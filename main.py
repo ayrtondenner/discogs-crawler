@@ -7,9 +7,9 @@ from selenium.webdriver.remote.webelement import WebElement
 import pandas as pd
 from album_types import AlbumRow
 from typing import List
-import time
 from tqdm import tqdm
 from typing import Optional
+import time, re
 
 _SEARCH_URL = "https://www.discogs.com/artist/3264165-Dami%C3%A3o-Experien%C3%A7a"
 
@@ -22,6 +22,9 @@ def _initialize_chromedriver():
     except Exception as e:
         print(f"Error: {e}")
     return driver
+
+def _navigate_to_element(web_element: WebElement):
+    web_element._parent.execute_script("arguments[0].scrollIntoView({block: 'center'});", web_element)
 
 def _close_popups(driver: ChromiumDriver):
     try:
@@ -112,26 +115,39 @@ def _find_expand_button(tr: WebElement) -> Optional[WebElement]:
         print(f"Error finding expand button: {e}")
         raise e
 
-def _expand_all_versions(driver: ChromiumDriver, albums_table: WebElement):
+def _expand_all_versions(driver: ChromiumDriver):
+    
+    albums_table = _find_albums_table(driver)
+    
     try:
         trs = WebDriverWait(driver, 10).until(lambda d: albums_table.find_elements(By.TAG_NAME, 'tr'))
-        for tr in trs:
-            tr._parent.execute_script("arguments[0].scrollIntoView({block: 'center'});", tr)
-            #time.sleep(0.5)  # Small delay to ensure the row is fully rendered
-            
+        expand_count = 0
+
+        for tr in tqdm(trs, desc="Expanding versions", unit="row"):
+            _navigate_to_element(tr)
+
             expand_button = _find_expand_button(tr)
 
             if expand_button is None:
                 continue # Skip rows without an expand button
 
             assert expand_button.get_attribute('aria-expanded') == "false", "Expected aria-expanded to be 'false' before click"
+
+            # extract number of versions from button text
+            btn_text = expand_button.text
+            match = re.search(r'(\d+)', btn_text)
+            versions_count = int(match.group(1)) if match else 0
+            expand_count += versions_count
+
             expand_button.click()
             WebDriverWait(driver, 10).until(lambda _: expand_button.get_attribute('aria-expanded') == "true") # pyright: ignore[reportOptionalMemberAccess]
+            
+        print(f"Added {expand_count} expanded rows in total.")
+        
+        return len(trs), expand_count
     except Exception as e:
         print(f"Error expanding all versions: {e}")
         raise e
-    
-    time.sleep(0.5)  # Wait for the UI to update after expanding all versions
 
 def extract_album_row(tr: WebElement, is_version: bool = False) -> AlbumRow:
     # 1) formatsContainer div with "LP"
@@ -171,15 +187,20 @@ def extract_album_row(tr: WebElement, is_version: bool = False) -> AlbumRow:
     album_row.years.add(year)
     return album_row
 
-def _extract_album_rows(driver: ChromiumDriver, albums_table: WebElement) -> List[AlbumRow]:
+def _extract_album_rows(driver: ChromiumDriver) -> tuple[List[AlbumRow], int]:
+    
+    albums_table = _find_albums_table(driver)
+    _navigate_to_element(albums_table)
+    print("Waiting for albums table to load...")
+    time.sleep(2)
+    
     try:
         trs = WebDriverWait(driver, 10).until(lambda d: albums_table.find_elements(By.TAG_NAME, 'tr'))
         album_rows: List[AlbumRow] = []
         
-        for tr in trs:
-            tr._parent.execute_script("arguments[0].scrollIntoView({block: 'center'});", tr)
-            # time.sleep(0.5)  # Small delay to ensure the row is fully rendered
-            
+        for tr in tqdm(trs, desc="Extracting all rows", unit="row"):
+            _navigate_to_element(tr)
+
             tr_class = tr.get_attribute("class")
             assert tr_class is not None, "Expected tr to have a class attribute"
 
@@ -217,7 +238,7 @@ def _extract_album_rows(driver: ChromiumDriver, albums_table: WebElement) -> Lis
             else:
                 raise ValueError(f"Unexpected tr class: {tr_class}")
 
-        return album_rows
+        return album_rows, len(trs)
     except Exception as e:
         print(f"Error extracting album rows: {e}")
         raise e
@@ -240,14 +261,13 @@ def extract_from_webpage():
 
         _close_popups(driver)
         _update_table_parameters(driver)
-        
-        albums_table = _find_albums_table(driver)
 
-        albums_count = len(WebDriverWait(driver, 10).until(lambda d: albums_table.find_elements(By.TAG_NAME, 'tr')))
-        _expand_all_versions(driver, albums_table)
-        album_rows = _extract_album_rows(driver, albums_table)
-        
-        assert len(album_rows) == albums_count, f"Expected {albums_count} album rows, but found {len(album_rows)}"
+        #albums_count = len(WebDriverWait(driver, 10).until(lambda d: albums_table.find_elements(By.TAG_NAME, 'tr')))
+        original_trs_len, expand_count = _expand_all_versions(driver)
+        album_rows, expanded_trs_len = _extract_album_rows(driver)
+
+        assert len(album_rows) == original_trs_len, f"Expected {original_trs_len} album rows, but found {len(album_rows)}"
+        assert original_trs_len + (expand_count * 2) == expanded_trs_len, f"Expected {original_trs_len} original rows + {expand_count * 2} expanded rows, but found {expanded_trs_len}"
         
         # Manually add an album that doesn't exist in the table
         new_album_row = AlbumRow(title="Planeta Lamma", ids={"DEPL108, musique brut 2"}, years={"2022"})
