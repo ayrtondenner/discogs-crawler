@@ -5,6 +5,7 @@ _ALBUMS_FILEPATH = f"{_FILES_FOLDER}/albums.csv"
 _OWNED_ALBUMS_FILEPATH = f"{_FILES_FOLDER}/owned_albums.txt"
 _NOT_OWNED_ALBUMS_FILEPATH = f"{_FILES_FOLDER}/not_owned_albums.txt"
 
+
 # Update 'owned' column
 def _is_owned(row: pd.Series, owned_albums: list[str]) -> bool:
     title = str(row["title"])
@@ -13,6 +14,7 @@ def _is_owned(row: pd.Series, owned_albums: list[str]) -> bool:
 
     owned = any(album for album in owned_albums if album in title)
     return owned
+
 
 def update_csv():
     # Read owned_albums.txt as a list of strings
@@ -42,14 +44,14 @@ def update_csv():
 
     total = len(df)
     not_owned_count = len(not_owned_albums)
-    owned_count = total - not_owned_count    
+    owned_count = total - not_owned_count
 
     owned_percentage = (owned_count / total) * 100 if total else 0
     not_owned_percentage = (not_owned_count / total) * 100 if total else 0
 
     print(f"Owned: {owned_count} ({owned_percentage:.2f}%)")
     print(f"Not Owned: {not_owned_count} ({not_owned_percentage:.2f}%)")
-    
+
     print("\nNot Owned Albums:")
     for album in not_owned_albums:
         print(f"- {album}")
